@@ -61,8 +61,11 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof Blob) || file.size === 0) return json({ error: "No audio received." }, 400);
   if (file.size > MAX_AUDIO_BYTES) return json({ error: "That recording is too long. Please keep it short." }, 413);
 
+  // MediaRecorder reports types like "audio/webm;codecs=opus"; the upstream API wants a plain type and a file extension.
+  const baseType = (file.type.split(";")[0] || "audio/webm").trim().toLowerCase();
+  const ext = baseType.includes("ogg") ? "ogg" : baseType.includes("mp4") ? "mp4" : baseType.includes("wav") ? "wav" : "webm";
   const upstream = new FormData();
-  upstream.append("file", file, "voice");
+  upstream.append("file", new Blob([await file.arrayBuffer()], { type: baseType }), `voice.${ext}`);
   upstream.append("language_code", "unknown"); // auto-detect: English, Hindi, Marathi, ...
 
   let res: Response;
@@ -78,7 +81,8 @@ export async function POST(request: NextRequest) {
   }
 
   if (!res.ok) {
-    console.error("[TRANSCRIBE_ERROR]", res.status);
+    const detail = await res.text().catch(() => "");
+    console.error("[TRANSCRIBE_ERROR]", res.status, baseType, file.size, detail.slice(0, 300));
     return json({ error: "I couldn't understand that recording. Please try again or type your message." }, 502);
   }
 
