@@ -44,6 +44,7 @@ export function AssistantChat({
   const endRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRef = useRef<{ send: (text: string) => Promise<void>; draft: string }>({ send: async () => {}, draft: "" });
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -73,8 +74,8 @@ export function AssistantChat({
         setVoiceError(data.error || "I couldn't understand that recording. Please try again.");
         return;
       }
-      // Fill the box rather than sending, so the patient can correct names and times first.
-      setDraft((prev) => `${prev.trim()} ${data.text}`.trim().slice(0, 1000));
+      // Called through a ref: this runs from a recorder callback created before the latest render.
+      void latestRef.current.send(`${latestRef.current.draft.trim()} ${data.text}`.trim().slice(0, 1000));
     } catch {
       setVoiceError("I could not reach the server. Please check your connection and try again.");
     } finally {
@@ -154,6 +155,8 @@ export function AssistantChat({
     }
   }
 
+  latestRef.current = { send, draft };
+
   return (
     <Card className="flex h-[calc(100vh-290px)] min-h-[440px] flex-col p-0">
       <div className="flex items-center justify-between gap-3 border-b border-[#e6ebf2] px-5 py-3">
@@ -211,7 +214,7 @@ export function AssistantChat({
           className={`px-5 pt-2 text-xs ${voiceError && !recording && !transcribing ? "text-red-600" : "text-slate-500"}`}
           role="status"
         >
-          {recording ? "Listening… tap the square to stop." : transcribing ? "Converting your voice to text…" : voiceError}
+          {recording ? "Listening… tap the square to stop." : transcribing ? "Converting your voice to text and sending…" : voiceError}
         </p>
       )}
       <form
