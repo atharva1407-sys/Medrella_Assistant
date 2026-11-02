@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { AlertCircle, Bot, CalendarCheck, Loader2, SendHorizonal, ShieldCheck, Sparkles, User } from "lucide-react";
+import { AlertCircle, Bot, CalendarCheck, Loader2, Mic, SendHorizonal, ShieldCheck, Sparkles, Square, User } from "lucide-react";
 import { requestPreauthAction } from "@/actions/insurance";
 import type { AgentCard } from "@/lib/agent/tools";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,8 @@ interface Message {
   cards?: AgentCard[];
   isError?: boolean;
 }
+
+const MAX_RECORDING_MS = 30_000;
 
 const SUGGESTIONS = [
   "Find a cardiologist",
@@ -36,11 +38,84 @@ export function AssistantChat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, busy]);
+
+  // Release the microphone if the page is left mid-recording.
+  useEffect(() => {
+    return () => {
+      if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.stop();
+        recorder.stream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []);
+
+  async function transcribe(blob: Blob) {
+    setTranscribing(true);
+    try {
+      const body = new FormData();
+      body.append("file", blob, "voice");
+      const res = await fetch("/api/agent/transcribe", { method: "POST", body });
+      const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
+      if (!res.ok || !data.text) {
+        setVoiceError(data.error || "I couldn't understand that recording. Please try again.");
+        return;
+      }
+      // Fill the box rather than sending, so the patient can correct names and times first.
+      setDraft((prev) => `${prev.trim()} ${data.text}`.trim().slice(0, 1000));
+    } catch {
+      setVoiceError("I could not reach the server. Please check your connection and try again.");
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  async function toggleRecording() {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    setVoiceError(null);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceError("Voice input isn't supported in this browser. Please type your message.");
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setVoiceError("Microphone access was blocked. Allow it in your browser settings to use voice input.");
+      return;
+    }
+    const chunks: Blob[] = [];
+    const recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = () => {
+      if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      stream.getTracks().forEach((t) => t.stop());
+      recorderRef.current = null;
+      setRecording(false);
+      if (chunks.length) void transcribe(new Blob(chunks, { type: recorder.mimeType }));
+    };
+    recorderRef.current = recorder;
+    recorder.start();
+    setRecording(true);
+    stopTimerRef.current = setTimeout(() => recorder.state !== "inactive" && recorder.stop(), MAX_RECORDING_MS);
+  }
 
   const suggestions = insuranceEnabled ? [...SUGGESTIONS, "What is the status of my insurance claims?"] : SUGGESTIONS;
 
@@ -131,6 +206,14 @@ export function AssistantChat({
         <div ref={endRef} />
       </div>
 
+      {(recording || transcribing || voiceError) && (
+        <p
+          className={`px-5 pt-2 text-xs ${voiceError && !recording && !transcribing ? "text-red-600" : "text-slate-500"}`}
+          role="status"
+        >
+          {recording ? "Listening… tap the square to stop." : transcribing ? "Converting your voice to text…" : voiceError}
+        </p>
+      )}
       <form
         className="flex items-center gap-2 border-t border-[#e6ebf2] px-4 py-3"
         onSubmit={(e) => {
@@ -141,12 +224,22 @@ export function AssistantChat({
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Type your message…"
+          placeholder="Type or speak your message…"
           maxLength={1000}
           disabled={!configured || busy}
           aria-label="Message to the assistant"
         />
-        <Button type="submit" variant="default" disabled={!configured || busy || !draft.trim()}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={toggleRecording}
+          disabled={!configured || busy || transcribing}
+          aria-label={recording ? "Stop recording" : "Start voice input"}
+          className={recording ? "border-red-300 text-red-600" : undefined}
+        >
+          {transcribing ? <Loader2 size={15} className="animate-spin" /> : recording ? <Square size={15} /> : <Mic size={15} />}
+        </Button>
+        <Button type="submit" variant="default" disabled={!configured || busy || recording || transcribing || !draft.trim()}>
           <SendHorizonal size={15} />
           Send
         </Button>
