@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { AlertCircle, Bot, CalendarCheck, Loader2, Mic, SendHorizonal, ShieldCheck, Sparkles, Square, User } from "lucide-react";
+import { AlertCircle, Bot, CalendarCheck, Loader2, Mic, SendHorizonal, ShieldCheck, Sparkles, Square, User, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { requestPreauthAction } from "@/actions/insurance";
 import type { AgentCard } from "@/lib/agent/tools";
 import { Badge } from "@/components/ui/badge";
@@ -30,10 +31,14 @@ export function AssistantChat({
   firstName,
   configured,
   insuranceEnabled,
+  className,
+  onClose,
 }: {
   firstName: string;
   configured: boolean;
   insuranceEnabled: boolean;
+  className?: string;
+  onClose?: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -158,7 +163,7 @@ export function AssistantChat({
   latestRef.current = { send, draft };
 
   return (
-    <Card className="flex h-[calc(100vh-290px)] min-h-[440px] flex-col p-0">
+    <Card className={cn("flex h-[calc(100vh-290px)] min-h-[440px] flex-col p-0", className)}>
       <div className="flex items-center justify-between gap-3 border-b border-[#e6ebf2] px-5 py-3">
         <div className="flex items-center gap-2.5">
           <span className="grid size-9 place-items-center rounded-full bg-[#e8f2ff] text-[#1769e8]">
@@ -169,7 +174,19 @@ export function AssistantChat({
             <div className="text-[11px] text-slate-500">Virtual helper · not a doctor</div>
           </div>
         </div>
-        <Badge variant={configured ? "green" : "amber"}>{configured ? "Online" : "Not set up"}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={configured ? "green" : "amber"}>{configured ? "Online" : "Not set up"}</Badge>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close assistant"
+              className="grid size-7 place-items-center rounded-full text-slate-500 hover:bg-slate-100"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4" aria-live="polite">

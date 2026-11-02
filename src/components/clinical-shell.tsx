@@ -22,7 +22,6 @@ import {
   ChevronDown,
   ChevronRight,
   ShieldCheck,
-  Bot,
   Menu,
   X,
   LogOut,
@@ -151,7 +150,6 @@ export function ClinicalShell({ user, children }: ClinicalShellProps) {
     if (pathname.startsWith("/reports")) return "Visit Reports & Analytics";
     if (pathname.startsWith("/patient/payments")) return "Payments & Receipts";
     if (pathname.startsWith("/patient/insurance")) return "Insurance & Cashless";
-    if (pathname.startsWith("/patient/assistant")) return "Medrella Assistant";
     if (pathname.startsWith("/patient/dashboard")) return "Patient Portal";
     if (pathname.startsWith("/doctor/dashboard")) return "Doctor Agenda";
     if (pathname.startsWith("/doctor/availability")) return "Weekly Shifts";
@@ -256,15 +254,6 @@ export function ClinicalShell({ user, children }: ClinicalShellProps) {
               >
                 <ShieldCheck size={17} />
                 <span>Insurance</span>
-              </Link>
-
-              <Link
-                href="/patient/assistant"
-                onClick={() => setSidebarOpen(false)}
-                className={`nav-item ${pathname.startsWith("/patient/assistant") ? "active" : ""}`}
-              >
-                <Bot size={17} />
-                <span>Assistant</span>
               </Link>
 
               <Link
