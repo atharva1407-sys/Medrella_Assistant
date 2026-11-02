@@ -1,0 +1,248 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { AlertCircle, Bot, CalendarCheck, Loader2, SendHorizonal, ShieldCheck, Sparkles, User } from "lucide-react";
+import { requestPreauthAction } from "@/actions/insurance";
+import type { AgentCard } from "@/lib/agent/tools";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  cards?: AgentCard[];
+  isError?: boolean;
+}
+
+const SUGGESTIONS = [
+  "Find a cardiologist",
+  "What slots are open tomorrow for a general physician?",
+  "Show my appointments",
+  "मुझे त्वचा रोग विशेषज्ञ चाहिए",
+];
+
+export function AssistantChat({
+  firstName,
+  configured,
+  insuranceEnabled,
+}: {
+  firstName: string;
+  configured: boolean;
+  insuranceEnabled: boolean;
+}) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, busy]);
+
+  const suggestions = insuranceEnabled ? [...SUGGESTIONS, "What is the status of my insurance claims?"] : SUGGESTIONS;
+
+  async function send(text: string) {
+    const message = text.trim();
+    if (!message || busy) return;
+    const history = messages
+      .filter((m) => !m.isError)
+      .slice(-12)
+      .map((m) => ({ role: m.role, content: m.content }));
+    setMessages((prev) => [...prev, { role: "user", content: message }]);
+    setDraft("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/agent/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { reply?: string; cards?: AgentCard[]; error?: string };
+      if (!res.ok || !data.reply) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: data.error || "Something went wrong. Please try again.", isError: true },
+        ]);
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: data.reply!, cards: data.cards ?? [] }]);
+      }
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "I could not reach the server. Please check your connection and try again.", isError: true },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="flex h-[calc(100vh-290px)] min-h-[440px] flex-col p-0">
+      <div className="flex items-center justify-between gap-3 border-b border-[#e6ebf2] px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-9 place-items-center rounded-full bg-[#e8f2ff] text-[#1769e8]">
+            <Bot size={18} />
+          </span>
+          <div>
+            <div className="text-sm font-bold text-slate-900">Medrella Assistant</div>
+            <div className="text-[11px] text-slate-500">Virtual helper · not a doctor</div>
+          </div>
+        </div>
+        <Badge variant={configured ? "green" : "amber"}>{configured ? "Online" : "Not set up"}</Badge>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4" aria-live="polite">
+        {!configured && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <AlertCircle size={15} className="mt-0.5 shrink-0" />
+            <span>The assistant is not set up yet (no language-model key is configured). Booking still works from the Doctors page.</span>
+          </div>
+        )}
+
+        {messages.length === 0 && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Hi {firstName}! I can help you find a doctor, check open slots and review your appointments
+              {insuranceEnabled ? " and insurance" : ""}. I can&apos;t give medical advice. For emergencies call 112.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((s) => (
+                <Button key={s} variant="outline" size="sm" disabled={!configured || busy} onClick={() => send(s)}>
+                  <Sparkles size={13} />
+                  {s}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((m, i) => (
+          <MessageBubble key={i} message={m} />
+        ))}
+
+        {busy && (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Loader2 size={14} className="animate-spin" /> Thinking…
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
+
+      <form
+        className="flex items-center gap-2 border-t border-[#e6ebf2] px-4 py-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          send(draft);
+        }}
+      >
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Type your message…"
+          maxLength={1000}
+          disabled={!configured || busy}
+          aria-label="Message to the assistant"
+        />
+        <Button type="submit" variant="default" disabled={!configured || busy || !draft.trim()}>
+          <SendHorizonal size={15} />
+          Send
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+/** The model often wraps names and times in **bold**; show that as bold instead of literal asterisks. */
+function renderInline(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") && part.length > 4 ? <strong key={i}>{part.slice(2, -2)}</strong> : part
+  );
+}
+
+function MessageBubble({ message }: { message: Message }) {
+  const isUser = message.role === "user";
+  return (
+    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
+      <span
+        className={`grid size-7 shrink-0 place-items-center rounded-full ${
+          isUser ? "bg-[#1769e8] text-white" : "bg-[#e8f2ff] text-[#1769e8]"
+        }`}
+      >
+        {isUser ? <User size={14} /> : <Bot size={14} />}
+      </span>
+      <div className={`max-w-[85%] space-y-2 ${isUser ? "items-end" : ""}`}>
+        <div
+          className={`whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-sm ${
+            isUser
+              ? "bg-[#1769e8] text-white"
+              : message.isError
+                ? "border border-red-200 bg-red-50 text-red-800"
+                : "bg-[#f3f8fe] text-slate-800"
+          }`}
+        >
+          {isUser ? message.content : renderInline(message.content)}
+        </div>
+        {message.cards?.map((card, i) => (
+          <ActionCard key={i} card={card} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({ card }: { card: AgentCard }) {
+  const [isPending, startTransition] = useTransition();
+  const [outcome, setOutcome] = useState<{ ok: boolean; text: string } | null>(null);
+  const Icon = card.kind === "PREAUTH" ? ShieldCheck : CalendarCheck;
+
+  return (
+    <Card className="space-y-2 p-3.5">
+      <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+        <Icon size={15} className="text-[#1769e8]" />
+        {card.title}
+      </div>
+      <ul className="space-y-0.5 text-xs text-slate-600">
+        {card.lines.map((line, i) => (
+          <li key={i}>{line}</li>
+        ))}
+      </ul>
+
+      {card.href && (
+        <Button asChild variant="default" size="sm">
+          <Link href={card.href}>{card.kind === "BOOKING" ? "Review & book" : "Open dashboard"}</Link>
+        </Button>
+      )}
+
+      {card.action && !outcome?.ok && (
+        <Button
+          variant="default"
+          size="sm"
+          disabled={isPending}
+          onClick={() =>
+            startTransition(async () => {
+              const res = await requestPreauthAction({
+                appointmentId: card.action!.appointmentId,
+                policyId: card.action!.policyId,
+              });
+              setOutcome(
+                res.success
+                  ? { ok: true, text: res.message ?? "Request sent." }
+                  : { ok: false, text: res.error }
+              );
+            })
+          }
+        >
+          {isPending && <Loader2 size={13} className="animate-spin" />}
+          {card.action.label}
+        </Button>
+      )}
+
+      {outcome && (
+        <p className={`text-xs font-semibold ${outcome.ok ? "text-emerald-700" : "text-red-600"}`}>{outcome.text}</p>
+      )}
+    </Card>
+  );
+}
